@@ -1,7 +1,7 @@
 {
   "version": 3,
-  "installCommand": "npm install && npm install --prefix client --include=dev && npm install --prefix server --include=dev",
-  "buildCommand": "npm run build",
+  "installCommand": "npm install --prefix server --include=dev && npm install --prefix client --include=dev",
+  "buildCommand": "npm run build --prefix server && npm run build --prefix client",
   "outputDirectory": "client/dist",
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/[...slug].ts" },
