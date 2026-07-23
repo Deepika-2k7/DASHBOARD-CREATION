@@ -24,25 +24,27 @@ export const LeaderboardList = ({ entries }: { entries: LeaderboardEntry[] }) =>
       return (
         <Card key={entry.studentId} bg={topStyle ? topStyle.bg : "whiteAlpha.900"} border="1px solid" borderColor="whiteAlpha.700">
           <CardBody>
-            <Flex justify="space-between" align="center" gap={4}>
-              <HStack spacing={4}>
+            <Flex direction={{ base: "column", md: "row" }} justify="space-between" align={{ base: "start", md: "center" }} gap={4}>
+              <HStack spacing={4} align="start" minW={0} flex="1">
                 <Text fontSize="2xl" fontWeight="800" minW="32px">
                   {topStyle ? topStyle.badge : `#${index + 1}`}
                 </Text>
                 <Avatar name={entry.name} bg={index < 3 ? "lilac.400" : "brand.400"} color="white" />
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="800">{entry.name}</Text>
-                  <Text fontSize="sm" color="gray.500">
+                <VStack align="start" spacing={0} minW={0}>
+                  <Text fontWeight="800" wordBreak="break-word">
+                    {entry.name}
+                  </Text>
+                  <Text fontSize="sm" color="gray.500" wordBreak="break-word">
                     @{entry.username.toUpperCase()}
                   </Text>
                 </VStack>
               </HStack>
 
-              <VStack align="end" spacing={1}>
+              <VStack align={{ base: "start", md: "end" }} spacing={1} w={{ base: "full", md: "auto" }}>
                 <Badge colorScheme="purple" borderRadius="full" px={3} py={1}>
                   {entry.score} pts
                 </Badge>
-                <Text fontSize="sm" color="gray.600">
+                <Text fontSize="sm" color="gray.600" wordBreak="break-word">
                   {entry.completedCount} approved · {entry.onTimeCount} on time · streak {entry.streak}
                 </Text>
               </VStack>

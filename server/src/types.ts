@@ -13,4 +13,5 @@ export interface JwtPayload {
 export interface AuthRequest extends Request {
   user?: JwtPayload;
   files?: any[] | { [fieldname: string]: any[] };
+  file?: Express.Multer.File;
 }

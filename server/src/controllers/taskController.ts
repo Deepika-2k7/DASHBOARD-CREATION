@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthRequest } from "../types.js";
 import { Submission } from "../models/Submission.js";
 import { Task } from "../models/Task.js";
+import { TaskCompletion } from "../models/TaskCompletion.js";
 import { sameDay, startOfDay } from "../utils/dates.js";
 
 export const createTask = async (req: AuthRequest, res: Response) => {
@@ -43,25 +44,57 @@ export const getTasks = async (req: AuthRequest, res: Response) => {
   const tasks = await Task.find().sort({ date: -1 }).lean();
 
   if (req.user?.role === "admin") {
-    res.json(tasks);
+    const completions = await TaskCompletion.find().populate("studentId", "username").lean();
+    const completionsByTask = new Map<
+      string,
+      { completedCount: number; completedStudents: string[] }
+    >();
+
+    for (const completion of completions) {
+      const taskId = String(completion.taskId);
+      const bucket =
+        completionsByTask.get(taskId) || { completedCount: 0, completedStudents: [] };
+      bucket.completedCount += 1;
+      const username = (completion.studentId as any)?.username;
+      if (username) {
+        bucket.completedStudents.push(username);
+      }
+      completionsByTask.set(taskId, bucket);
+    }
+
+    res.json(
+      tasks.map((task) => {
+        const stats = completionsByTask.get(String(task._id)) || {
+          completedCount: 0,
+          completedStudents: []
+        };
+
+        return {
+          ...task,
+          completedCount: stats.completedCount,
+          completedStudents: stats.completedStudents
+        };
+      })
+    );
     return;
   }
 
-  const submissions = await Submission.find({ studentId: req.user?.userId }).select("taskId submittedAt status").lean();
-  const submittedTaskIds = new Map(submissions.map((item) => [String(item.taskId), item]));
+  const completions = await TaskCompletion.find({ studentId: req.user?.userId })
+    .select("taskId completedAt")
+    .lean();
+  const completedTaskIds = new Map(completions.map((item) => [String(item.taskId), item]));
   const now = new Date();
 
   const decorated = tasks.map((task) => {
-    const submission = submittedTaskIds.get(String(task._id));
+    const completion = completedTaskIds.get(String(task._id));
     const isOpen = now <= new Date(task.deadline);
 
     return {
       ...task,
-      isSubmitted: Boolean(submission),
-      submissionStatus: submission ? submission.status : "pending",
+      completionStatus: completion ? "completed" : "pending",
+      completedAt: completion?.completedAt || null,
       isOpen,
-      friendlyLockMessage: isOpen ? null : "Submissions closed for this task window.",
-      submittedAt: submission?.submittedAt || null
+      friendlyLockMessage: isOpen ? null : "Task window is closed."
     };
   });
 
@@ -111,5 +144,42 @@ export const deleteTask = async (req: AuthRequest, res: Response) => {
     return;
   }
 
+  await TaskCompletion.deleteMany({ taskId: id });
   res.json({ message: "Task deleted successfully." });
+};
+
+export const completeTask = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+
+  if (req.user?.role !== "student") {
+    res.status(403).json({ message: "Only students can complete tasks." });
+    return;
+  }
+
+  const task = await Task.findById(id);
+  if (!task) {
+    res.status(404).json({ message: "Task not found." });
+    return;
+  }
+
+  const existingCompletion = await TaskCompletion.findOne({
+    taskId: id,
+    studentId: req.user.userId
+  });
+
+  if (existingCompletion) {
+    res.status(409).json({ message: "This task has already been marked completed." });
+    return;
+  }
+
+  const completion = await TaskCompletion.create({
+    taskId: id,
+    studentId: req.user.userId,
+    completedAt: new Date()
+  });
+
+  res.status(201).json({
+    message: "Task marked as completed.",
+    completion
+  });
 };

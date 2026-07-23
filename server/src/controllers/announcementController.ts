@@ -8,6 +8,21 @@ export const getAnnouncements = async (_req: AuthRequest, res: Response) => {
   res.json(announcements);
 };
 
+export const markAnnouncementsRead = async (req: AuthRequest, res: Response) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    res.status(401).json({ message: "Authentication required." });
+    return;
+  }
+
+  await Announcement.updateMany(
+    { readBy: { $ne: userId } },
+    { $addToSet: { readBy: userId } }
+  );
+
+  res.json({ message: "Announcements marked as read." });
+};
+
 export const createAnnouncement = async (req: AuthRequest, res: Response) => {
   const { title, message } = req.body;
 

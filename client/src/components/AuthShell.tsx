@@ -31,13 +31,19 @@ export const AuthShell = ({
       borderRadius="full"
     />
 
-    <Container maxW="6xl" py={{ base: 8, md: 12 }} position="relative">
-      <Flex minH="calc(100vh - 96px)" align="center" justify="center" gap={{ base: 8, lg: 14 }} direction={{ base: "column", lg: "row" }}>
-        <VStack align="start" spacing={5} flex="1" maxW="lg" px={{ base: 2, md: 0 }}>
+    <Container maxW="6xl" py={{ base: 8, md: 12 }} position="relative" px={{ base: 4, sm: 6, md: 8 }}>
+      <Flex
+        minH="calc(100vh - 96px)"
+        align={{ base: "stretch", lg: "center" }}
+        justify="center"
+        gap={{ base: 8, lg: 14 }}
+        direction={{ base: "column", lg: "row" }}
+      >
+        <VStack align={{ base: "center", lg: "start" }} spacing={5} flex="1" maxW="lg" px={{ base: 2, md: 0 }} textAlign={{ base: "center", lg: "left" }}>
           <Text fontSize="sm" fontWeight="800" color="brand.700" letterSpacing="widest">
             {eyebrow}
           </Text>
-          <Heading size="2xl" lineHeight="1.05">
+          <Heading size="2xl" lineHeight="1.05" fontSize={{ base: "3xl", md: "4xl", lg: "5xl" }}>
             Simple daily work tracking for students and admins
           </Heading>
           <Text color="gray.600" fontSize="lg">
@@ -45,7 +51,7 @@ export const AuthShell = ({
           </Text>
         </VStack>
 
-        <Card w="full" maxW="md" bg="whiteAlpha.920" backdropFilter="blur(14px)" border="1px solid" borderColor="whiteAlpha.700">
+        <Card w="full" maxW={{ base: "full", md: "md" }} bg="whiteAlpha.920" backdropFilter="blur(14px)" border="1px solid" borderColor="whiteAlpha.700">
           <CardBody p={{ base: 6, md: 8 }}>
             <VStack align="stretch" spacing={5}>
               <Box>

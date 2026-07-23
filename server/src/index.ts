@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "node:path";
+import { connectDb } from "./config/db.js";
+import { env } from "./config/env.js";
 import announcementRoutes from "./routes/announcementRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
@@ -16,21 +18,22 @@ import taskRoutes from "./routes/taskRoutes.js";
 dotenv.config();
 
 const app = express();
-const port = Number(process.env.PORT || 5000);
-const mongoUri = process.env.MONGODB_URI || "";
-const clientUrl = process.env.CLIENT_URL || "http://localhost:5173";
+const port = env.port;
+const clientUrl = env.clientUrl;
+const uploadsRootDir = path.resolve(process.cwd(), process.env.UPLOADS_DIR || "uploads");
 
 console.log("[SERVER] Starting server initialization...");
 console.log("[SERVER] Port:", port);
 console.log("[SERVER] Client URL:", clientUrl);
-console.log("[SERVER] MongoDB URI configured:", mongoUri ? "✓ YES" : "✗ NO - MISSING");
+console.log("[SERVER] MongoDB URI configured:", env.mongoUri ? "✓ YES" : "✗ NO - MISSING");
 
+app.set("trust proxy", 1);
 app.use(cors({ origin: clientUrl }));
 console.log("[SERVER] CORS enabled for:", clientUrl);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.use("/uploads", express.static(uploadsRootDir));
 console.log("[SERVER] Uploads folder served at /uploads");
 
 // Request logging middleware
@@ -77,15 +80,14 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 const startServer = async () => {
   try {
-    if (!mongoUri) {
+    console.log("[DATABASE] Connecting to MongoDB...");
+    console.log("[DATABASE] URI configured:", env.mongoUri ? "YES" : "NO");
+
+    const connected = await connectDb();
+    if (!connected) {
       throw new Error("MONGODB_URI is missing in environment variables");
     }
 
-    console.log("[DATABASE] Connecting to MongoDB...");
-    console.log("[DATABASE] URI:", mongoUri.substring(0, 20) + "..." + mongoUri.substring(mongoUri.length - 10));
-    
-    await mongoose.connect(mongoUri);
-    
     console.log("[DATABASE] ✓ Successfully connected to MongoDB");
     console.log("[DATABASE] Connection state:", mongoose.connection.readyState);
     console.log("[DATABASE] Database name:", mongoose.connection.db?.databaseName || "unknown");

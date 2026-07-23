@@ -54,5 +54,7 @@ const submissionSchema = new Schema<ISubmission>(
 );
 
 submissionSchema.index({ studentId: 1, taskId: 1 }, { unique: true });
+submissionSchema.index({ status: 1, submittedAt: -1 });
+submissionSchema.index({ studentId: 1, submittedAt: -1 });
 
 export const Submission = mongoose.model<ISubmission>("Submission", submissionSchema);

@@ -53,4 +53,6 @@ const pollSchema = new Schema<IPoll>(
   }
 );
 
+pollSchema.index({ createdAt: -1 });
+
 export const Poll = mongoose.model<IPoll>("Poll", pollSchema);

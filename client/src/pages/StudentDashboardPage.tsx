@@ -1,5 +1,6 @@
 import {
   Box,
+  Badge,
   Button,
   Card,
   CardBody,
@@ -18,14 +19,17 @@ import {
   ModalOverlay,
   Progress,
   SimpleGrid,
+  Stack,
   Text,
   Textarea,
   VStack,
   useDisclosure
 } from "@chakra-ui/react";
+import { CheckIcon } from "@chakra-ui/icons";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { LeaderboardList } from "../components/LeaderboardList";
+import { ResourceList, ResourceItem } from "../components/ResourceList";
 import { Shell } from "../components/Shell";
 import { TaskCard, TaskCardData } from "../components/TaskCard";
 import { useAuth } from "../contexts/AuthContext";
@@ -46,6 +50,7 @@ interface Announcement {
   title: string;
   message: string;
   replies: { username: string; message: string; createdAt: string }[];
+  readBy?: string[];
   createdAt: string;
 }
 
@@ -55,13 +60,6 @@ interface LeaveRequestItem {
   reason: string;
   type: "leave" | "od";
   status: "pending" | "approved" | "rejected";
-}
-
-interface ResourceItem {
-  _id: string;
-  title: string;
-  fileUrl: string;
-  resourceType: "pdf" | "link";
 }
 
 interface PollItem {
@@ -102,6 +100,7 @@ export const StudentDashboardPage = () => {
   const [activeSection, setActiveSection] = useState("progress");
   const [tasks, setTasks] = useState<TaskCardData[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [topPerformers, setTopPerformers] = useState<LeaderboardEntry[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<LeaveRequestItem[]>([]);
   const [resources, setResources] = useState<ResourceItem[]>([]);
@@ -122,6 +121,34 @@ export const StudentDashboardPage = () => {
   const [submittingTask, setSubmittingTask] = useState(false);
   const [submittingLeave, setSubmittingLeave] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
+  const unreadAnnouncementsCount = useMemo(
+    () =>
+      announcements.filter((announcement) =>
+        !(announcement.readBy || []).some((entry) => String(entry) === String(user?.id))
+      ).length,
+    [announcements, user?.id]
+  );
+  const menuItems = useMemo(
+    () =>
+      MENU_ITEMS.map((item) =>
+        item.key === "announcements"
+          ? {
+              ...item,
+              label: (
+                <HStack justify="space-between" w="full">
+                  <Text>Announcements</Text>
+                  {unreadAnnouncementsCount > 0 ? (
+                    <Badge colorScheme="red" borderRadius="full" px={2} py={0.5}>
+                      {unreadAnnouncementsCount}
+                    </Badge>
+                  ) : null}
+                </HStack>
+              )
+            }
+          : item
+      ),
+    [unreadAnnouncementsCount]
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -129,6 +156,7 @@ export const StudentDashboardPage = () => {
       const [
         tasksResponse,
         leaderboardResponse,
+        topPerformersResponse,
         announcementsResponse,
         leaveResponse,
         resourcesResponse,
@@ -137,6 +165,7 @@ export const StudentDashboardPage = () => {
       ] = await Promise.all([
         api.get("/tasks"),
         api.get("/leaderboard"),
+        api.get("/leaderboard?limit=3"),
         api.get("/announcements"),
         api.get("/leave-requests"),
         api.get("/resources"),
@@ -146,6 +175,7 @@ export const StudentDashboardPage = () => {
 
       setTasks(tasksResponse.data);
       setLeaderboard(leaderboardResponse.data);
+      setTopPerformers(topPerformersResponse.data);
       setAnnouncements(announcementsResponse.data);
       setLeaveRequests(leaveResponse.data);
       setResources(resourcesResponse.data);
@@ -163,6 +193,32 @@ export const StudentDashboardPage = () => {
   }, []);
 
   useEffect(() => {
+    const markAnnouncementsRead = async () => {
+      if (activeSection !== "announcements" || unreadAnnouncementsCount === 0) {
+        return;
+      }
+
+      try {
+        await api.patch("/announcements/read");
+        setAnnouncements((prev) =>
+          prev.map((announcement) =>
+            (announcement.readBy || []).some((entry) => String(entry) === String(user?.id))
+              ? announcement
+              : {
+                  ...announcement,
+                  readBy: [...(announcement.readBy || []), String(user?.id || "")]
+                }
+          )
+        );
+      } catch {
+        // Keep the dashboard usable even if marking reads fails.
+      }
+    };
+
+    void markAnnouncementsRead();
+  }, [activeSection, unreadAnnouncementsCount, user?.id]);
+
+  useEffect(() => {
     setProfileName(user?.name || "");
     setProfileRegisterNumber(user?.registerNumber || "");
   }, [user?.name, user?.registerNumber]);
@@ -171,38 +227,28 @@ export const StudentDashboardPage = () => {
   const monthlyTasks = useMemo(() => tasks.filter((task) => task.type === "monthly"), [tasks]);
   const me = useMemo(() => leaderboard.find((entry) => entry.username === user?.username), [leaderboard, user?.username]);
   const rank = useMemo(() => Math.max(leaderboard.findIndex((entry) => entry.username === user?.username) + 1, 1), [leaderboard, user?.username]);
-  const completedTasks = tasks.filter((task) => task.submissionStatus === "approved").length;
-  const taskProgress = tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0;
-  const pendingTasks = tasks.filter((task) => !task.isSubmitted).length;
+  const completedTasks = tasks.filter((task) => task.completionStatus === "completed").length;
   const totalXp = me?.score || 0;
   const streak = me?.streak || 0;
 
   const openTaskModal = (task: TaskCardData) => {
     setSelectedTask(task);
-    setSubmissionLink("");
-    setSubmissionMessage("");
-    setFileUrl("");
     taskModal.onOpen();
   };
 
-  const handleTaskSubmit = async () => {
+  const handleTaskComplete = async () => {
     if (!selectedTask) {
       return;
     }
 
     setSubmittingTask(true);
     try {
-      await api.post("/submissions", {
-        taskId: selectedTask._id,
-        link: submissionLink,
-        message: submissionMessage,
-        fileUrl
-      });
-      toast.success("Task submitted", "Your work is now pending admin approval.");
+      await api.post(`/tasks/${selectedTask._id}/complete`);
+      toast.success("Task completed", "This task is now marked as completed for you.");
       taskModal.onClose();
       await loadData();
     } catch (error: any) {
-      toast.error("Couldn't submit task", error.response?.data?.message || "Please try again.");
+      toast.error("Couldn't complete task", error.response?.data?.message || "Please try again.");
     } finally {
       setSubmittingTask(false);
     }
@@ -277,9 +323,9 @@ export const StudentDashboardPage = () => {
   const renderTaskSection = (items: TaskCardData[], label: string) => (
     <VStack align="stretch" spacing={4}>
       <Heading size="md">{label}</Heading>
-      <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
         {items.map((task) => (
-          <TaskCard key={task._id} task={task} onSubmitClick={openTaskModal} />
+          <TaskCard key={task._id} task={task} onSubmitClick={openTaskModal} onCompleteClick={handleTaskComplete} />
         ))}
       </SimpleGrid>
       {!items.length ? (
@@ -357,16 +403,16 @@ export const StudentDashboardPage = () => {
                     ))}
                   </VStack>
 
-                  <HStack mt={4} align="start">
+                  <Stack mt={4} direction={{ base: "column", md: "row" }} align="stretch">
                     <Textarea
                       value={replyDrafts[announcement._id] || ""}
                       onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [announcement._id]: e.target.value }))}
                       placeholder="Reply to this announcement"
                     />
-                    <Button colorScheme="purple" onClick={() => handleReplySubmit(announcement._id)}>
+                    <Button colorScheme="purple" onClick={() => handleReplySubmit(announcement._id)} w={{ base: "full", md: "auto" }}>
                       Reply
                     </Button>
-                  </HStack>
+                  </Stack>
                 </CardBody>
               </Card>
             ))}
@@ -435,7 +481,7 @@ export const StudentDashboardPage = () => {
         );
       case "leave":
         return (
-          <Grid templateColumns={{ base: "1fr", xl: "1fr 1fr" }} gap={6}>
+          <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={6}>
             <GridItem>
               <Card>
                 <CardBody>
@@ -453,15 +499,15 @@ export const StudentDashboardPage = () => {
                       <FormLabel>Type</FormLabel>
                       <Input value={leaveType.toUpperCase()} readOnly />
                     </FormControl>
-                    <HStack>
-                      <Button variant={leaveType === "leave" ? "solid" : "outline"} onClick={() => setLeaveType("leave")}>
+                    <Stack direction={{ base: "column", sm: "row" }}>
+                      <Button variant={leaveType === "leave" ? "solid" : "outline"} onClick={() => setLeaveType("leave")} w={{ base: "full", sm: "auto" }}>
                         Leave
                       </Button>
-                      <Button variant={leaveType === "od" ? "solid" : "outline"} onClick={() => setLeaveType("od")}>
+                      <Button variant={leaveType === "od" ? "solid" : "outline"} onClick={() => setLeaveType("od")} w={{ base: "full", sm: "auto" }}>
                         OD
                       </Button>
-                    </HStack>
-                    <Button type="submit" colorScheme="purple" isLoading={submittingLeave}>
+                    </Stack>
+                    <Button type="submit" colorScheme="purple" isLoading={submittingLeave} w="full">
                       Submit Request
                     </Button>
                   </VStack>
@@ -513,30 +559,7 @@ export const StudentDashboardPage = () => {
           </Card>
         );
       case "resources":
-        return (
-          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
-            {resources.map((resource) => (
-              <Card key={resource._id}>
-                <CardBody>
-                  <Heading size="sm">{resource.title}</Heading>
-                  <Text color="gray.500" mt={2}>
-                    {resource.resourceType}
-                  </Text>
-                  <Button
-                    as="a"
-                    href={resource.fileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    colorScheme="linkedin"
-                    mt={4}
-                  >
-                    {resource.resourceType === "pdf" ? "Open PDF" : "Visit Resource"}
-                  </Button>
-                </CardBody>
-              </Card>
-            ))}
-          </SimpleGrid>
-        );
+        return <ResourceList resources={resources} title="Resources" />;
       case "progress":
       default:
         return (
@@ -587,22 +610,22 @@ export const StudentDashboardPage = () => {
                     Task completion
                   </Text>
                   <Heading size="lg" mt={1}>
-                    {taskProgress}%
+                    {completedTasks}
                   </Heading>
                   <Text color="gray.600" mt={2}>
-                    {completedTasks} of {tasks.length} approved
+                    {completedTasks} of {tasks.length} completed
                   </Text>
                 </CardBody>
               </Card>
             </SimpleGrid>
 
-            <Grid templateColumns={{ base: "1fr", xl: "1.4fr 1fr" }} gap={6}>
+            <Grid templateColumns={{ base: "1fr", md: "1.4fr 1fr" }} gap={6}>
               <GridItem>
                 <VStack align="stretch" spacing={4}>
                   <Heading size="md">My tasks</Heading>
-                  <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
                     {dailyTasks.slice(0, 2).map((task) => (
-                      <TaskCard key={task._id} task={task} onSubmitClick={openTaskModal} />
+                      <TaskCard key={task._id} task={task} onSubmitClick={openTaskModal} onCompleteClick={handleTaskComplete} compact />
                     ))}
                   </SimpleGrid>
                 </VStack>
@@ -613,7 +636,29 @@ export const StudentDashboardPage = () => {
                     <Heading size="md" mb={4}>
                       Top performers
                     </Heading>
-                    <LeaderboardList entries={leaderboard.slice(0, 5)} />
+                    <VStack align="stretch" spacing={3}>
+                      {topPerformers.length > 0 ? (
+                        topPerformers.map((entry, index) => (
+                          <Box key={entry.studentId} p={3} borderRadius="lg" bg="gray.50" border="1px solid" borderColor="gray.200">
+                            <Grid templateColumns={{ base: "1fr", md: "auto 1fr auto" }} gap={3} alignItems="center">
+                              <Text fontWeight="bold" minW="32px" whiteSpace="nowrap">
+                                #{index + 1}
+                              </Text>
+                              <Box minW={0}>
+                                <Text fontWeight="semibold" isTruncated>
+                                  {entry.username}
+                                </Text>
+                              </Box>
+                              <Text fontWeight="bold" color="purple.600" whiteSpace="nowrap">
+                                {entry.score} pts
+                              </Text>
+                            </Grid>
+                          </Box>
+                        ))
+                      ) : (
+                        <Text color="gray.500">No performers available yet.</Text>
+                      )}
+                    </VStack>
                   </CardBody>
                 </Card>
               </GridItem>
@@ -624,41 +669,38 @@ export const StudentDashboardPage = () => {
   };
 
   return (
-    <Shell menuItems={MENU_ITEMS} activeKey={activeSection} onSelect={setActiveSection} title="Student Dashboard" subtitle="student">
+    <Shell menuItems={menuItems} activeKey={activeSection} onSelect={setActiveSection} title="Student Dashboard" subtitle="student">
       {loading ? <Text color="gray.500">Loading your dashboard...</Text> : renderSection()}
 
       <Modal isOpen={taskModal.isOpen} onClose={taskModal.onClose} isCentered>
         <ModalOverlay backdropFilter="blur(6px)" />
-        <ModalContent borderRadius="3xl">
+        <ModalContent borderRadius="3xl" maxW={{ base: "calc(100vw - 1rem)", md: "lg" }}>
           <ModalHeader>{selectedTask?.title}</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
             <VStack align="stretch" spacing={4}>
-              <FormControl>
-                <FormLabel>Link / URL</FormLabel>
-                <Input value={submissionLink} onChange={(e) => setSubmissionLink(e.target.value)} placeholder="https://..." />
-              </FormControl>
-              <FormControl>
-                <FormLabel>Message to Admin</FormLabel>
-                <Textarea value={submissionMessage} onChange={(e) => setSubmissionMessage(e.target.value)} placeholder="Share your update or note..." />
-              </FormControl>
-              <FormControl>
-                <FormLabel>File upload</FormLabel>
-                <Input type="file" p={1} onChange={(e) => setFileUrl(e.target.files?.[0]?.name || "")} />
-                {fileUrl ? (
-                  <Text fontSize="sm" color="gray.500" mt={2}>
-                    Selected file: {fileUrl}
-                  </Text>
-                ) : null}
-              </FormControl>
-              <HStack justify="end">
-                <Button variant="ghost" onClick={taskModal.onClose}>
+              <Box p={4} borderRadius="xl" bg="gray.50">
+                <Text fontSize="sm" color="gray.500">
+                  Task Details
+                </Text>
+                <Text fontWeight="700" mt={1}>
+                  {selectedTask?.description || "No details available."}
+                </Text>
+                <Text fontSize="sm" color="gray.600" mt={3}>
+                  Date: {selectedTask ? new Date(selectedTask.date).toLocaleDateString() : "Not Available"}
+                </Text>
+                <Text fontSize="sm" color="gray.600" mt={1}>
+                  Deadline: {selectedTask ? new Date(selectedTask.deadline).toLocaleString() : "Not Available"}
+                </Text>
+              </Box>
+              <Stack direction={{ base: "column-reverse", sm: "row" }} justify="end">
+                <Button variant="ghost" onClick={taskModal.onClose} w={{ base: "full", sm: "auto" }}>
                   Close
                 </Button>
-                <Button colorScheme="linkedin" onClick={handleTaskSubmit} isLoading={submittingTask}>
-                  Mark as Done
+                <Button colorScheme="green" leftIcon={<CheckIcon />} onClick={handleTaskComplete} isLoading={submittingTask} w={{ base: "full", sm: "auto" }}>
+                  Completed
                 </Button>
-              </HStack>
+              </Stack>
             </VStack>
           </ModalBody>
         </ModalContent>

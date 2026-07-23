@@ -8,6 +8,8 @@ interface AuthUser {
   name: string;
   username: string;
   registerNumber: string;
+  email?: string;
+  googleId?: string;
   role: Role;
 }
 
@@ -16,6 +18,7 @@ interface AuthContextValue {
   token: string | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<Role>;
+  googleLogin: (credential: string) => Promise<Role>;
   signup: (payload: SignupPayload) => Promise<void>;
   updateProfile: (payload: ProfilePayload) => Promise<void>;
   logout: () => void;
@@ -55,8 +58,8 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
         const parsed = JSON.parse(saved) as { token: string; user: AuthUser };
         setAuthToken(parsed.token);
 
-        const response = await api.get("/auth/me");
-        const nextUser = response.data as AuthUser;
+      const response = await api.get("/auth/me");
+      const nextUser = response.data as AuthUser;
 
         setToken(parsed.token);
         setUser(nextUser);
@@ -104,6 +107,17 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
       console.error("[LOGIN] Error status:", error.response?.status);
       console.error("[LOGIN] Error message:", error.response?.data?.message || error.message);
       console.error("[LOGIN] Full error:", error);
+      throw error;
+    }
+  };
+
+  const googleLogin = async (credential: string): Promise<Role> => {
+    try {
+      const response = await api.post("/auth/google", { credential });
+      const user = response.data.user as AuthUser;
+      storeSession(response.data.token as string, user);
+      return user.role;
+    } catch (error: any) {
       throw error;
     }
   };
@@ -162,7 +176,7 @@ export const AuthProvider = ({ children }: PropsWithChildren) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, signup, updateProfile, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, login, googleLogin, signup, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   );

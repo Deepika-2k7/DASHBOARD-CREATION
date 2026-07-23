@@ -11,6 +11,7 @@ export interface IAnnouncement extends Document {
   title: string;
   message: string;
   replies: AnnouncementReply[];
+  readBy: mongoose.Types.ObjectId[];
   createdAt: Date;
 }
 
@@ -54,11 +55,18 @@ const announcementSchema = new Schema<IAnnouncement>(
     replies: {
       type: [replySchema],
       default: []
+    },
+    readBy: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: []
     }
   },
   {
     timestamps: true
   }
 );
+
+announcementSchema.index({ createdAt: -1 });
+announcementSchema.index({ readBy: 1 });
 
 export const Announcement = mongoose.model<IAnnouncement>("Announcement", announcementSchema);

@@ -47,5 +47,7 @@ const taskSchema = new Schema<ITask>(
 );
 
 taskSchema.index({ date: 1, type: 1 }, { unique: true });
+taskSchema.index({ status: 1, date: -1 });
+taskSchema.index({ createdAt: -1 });
 
 export const Task = mongoose.model<ITask>("Task", taskSchema);

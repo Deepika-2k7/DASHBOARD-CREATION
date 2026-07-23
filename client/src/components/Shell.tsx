@@ -21,7 +21,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 interface MenuItem {
   key: string;
-  label: string;
+  label: ReactNode;
 }
 
 interface ShellProps extends PropsWithChildren {
@@ -69,10 +69,12 @@ export const Shell = ({ children, menuItems, activeKey, onSelect, title, subtitl
   );
 
   return (
-    <Box minH="100vh" px={{ base: 4, md: 6 }} py={{ base: 4, md: 6 }} bgGradient="linear(to-b, whiteAlpha.500, transparent)">
+    <Box minH="100vh" px={{ base: 4, md: 6 }} py={{ base: 4, md: 6 }} bgGradient="linear(to-b, whiteAlpha.500, transparent)" overflowX="hidden">
       <Flex
-        align="center"
+        direction={{ base: "column", md: "row" }}
+        align={{ base: "stretch", md: "center" }}
         justify="space-between"
+        gap={{ base: 4, md: 0 }}
         mb={6}
         px={{ base: 3, md: 5 }}
         py={4}
@@ -82,7 +84,7 @@ export const Shell = ({ children, menuItems, activeKey, onSelect, title, subtitl
         borderRadius="28px"
         boxShadow="0 18px 40px rgba(95, 149, 251, 0.12)"
       >
-        <HStack spacing={3}>
+        <HStack spacing={3} align="start" minW={0} w="full">
           <IconButton
             aria-label="Open menu"
             icon={<HamburgerIcon />}
@@ -91,15 +93,15 @@ export const Shell = ({ children, menuItems, activeKey, onSelect, title, subtitl
             display={{ base: "inline-flex", md: "none" }}
             onClick={menu.onOpen}
           />
-          <Box>
+          <Box minW={0}>
             <Heading size="md">{title || "Task Glow"}</Heading>
-            <Text color="gray.500" fontSize="sm">
+            <Text color="gray.500" fontSize="sm" noOfLines={2}>
               Welcome, {displayName} 👋
             </Text>
           </Box>
         </HStack>
 
-        <HStack spacing={3}>
+        <HStack spacing={3} flexWrap="wrap" justify={{ base: "space-between", md: "flex-end" }} w={{ base: "full", md: "auto" }}>
           {actions}
           <Avatar name={user?.name || user?.username} bg="brand.500" color="white" />
           <Box display={{ base: "none", md: "block" }}>
@@ -138,7 +140,7 @@ export const Shell = ({ children, menuItems, activeKey, onSelect, title, subtitl
 
       <Drawer isOpen={menu.isOpen} placement="left" onClose={menu.onClose}>
         <DrawerOverlay />
-        <DrawerContent borderTopRightRadius="24px" borderBottomRightRadius="24px">
+        <DrawerContent borderTopRightRadius="24px" borderBottomRightRadius="24px" w="85vw" maxW="320px">
           <DrawerBody pt={8}>
             <Text fontSize="sm" fontWeight="800" color="brand.600" letterSpacing="widest" mb={4}>
               MENU

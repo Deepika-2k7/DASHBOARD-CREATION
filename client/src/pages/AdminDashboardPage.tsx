@@ -10,7 +10,9 @@ import {
   Heading,
   HStack,
   Input,
+  Select,
   SimpleGrid,
+  Stack,
   Text,
   Textarea,
   VStack
@@ -18,6 +20,7 @@ import {
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { LeaderboardList } from "../components/LeaderboardList";
+import { ResourceList, ResourceItem } from "../components/ResourceList";
 import { Shell } from "../components/Shell";
 import { useAuth } from "../contexts/AuthContext";
 import { useToastMessage } from "../hooks/useToastMessage";
@@ -30,6 +33,8 @@ interface Task {
   deadline: string;
   type: "daily" | "monthly";
   status: "active" | "archived";
+  completedCount?: number;
+  completedStudents?: string[];
 }
 
 interface Submission {
@@ -60,13 +65,6 @@ interface LeaveRequestItem {
   studentId: { name: string; username: string; registerNumber: string };
 }
 
-interface ResourceItem {
-  _id: string;
-  title: string;
-  fileUrl: string;
-  resourceType: "pdf" | "link";
-}
-
 interface PollItem {
   _id: string;
   question: string;
@@ -79,7 +77,7 @@ interface ScheduleItem {
 }
 
 const MENU_ITEMS = [
-  { key: "tasks", label: "My Tasks" },
+  { key: "tasks", label: "Upload Tasks" },
   { key: "monthly", label: "Monthly Tasks" },
   { key: "submissions", label: "Verification System" },
   { key: "leaderboard", label: "Leaderboard" },
@@ -98,6 +96,26 @@ const defaultSchedule = [
   { day: "Thursday", slots: ["Database", "Node.js", "Lab", "Review"] },
   { day: "Friday", slots: ["Aptitude", "Chakra UI", "Project", "Club"] }
 ];
+
+const resourcePdfMaxSizeMb = Math.max(Number(import.meta.env.VITE_RESOURCE_PDF_MAX_SIZE_MB || 100), 100);
+
+const normalizeResourceUrl = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "";
+    }
+
+    return parsed.href;
+  } catch {
+    return "";
+  }
+};
 
 export const AdminDashboardPage = () => {
   const { user, updateProfile } = useAuth();
@@ -120,13 +138,13 @@ export const AdminDashboardPage = () => {
   const [announcementMessage, setAnnouncementMessage] = useState("");
   const [resourceTitle, setResourceTitle] = useState("");
   const [resourceUrl, setResourceUrl] = useState("");
-  const [resourceType, setResourceType] = useState<"pdf" | "link">("link");
+  const [resourceType, setResourceType] = useState<"pdf" | "link" | "poll">("link");
   const [pollQuestion, setPollQuestion] = useState("");
   const [pollOptions, setPollOptions] = useState(["", "", "", ""]);
   const [profileName, setProfileName] = useState("");
   const [profileRegisterNumber, setProfileRegisterNumber] = useState("");
   const [profilePassword, setProfilePassword] = useState("");
-  const [resourceFiles, setResourceFiles] = useState<File[]>([]);
+  const [resourceFile, setResourceFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [savingSchedule, setSavingSchedule] = useState(false);
 
@@ -170,6 +188,14 @@ export const AdminDashboardPage = () => {
     loadData().catch((error: any) => {
       toast.error("Couldn't load admin panel", error.response?.data?.message || "Please refresh and try again.");
     });
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      api.get("/tasks").then((response) => setTasks(response.data)).catch(() => undefined);
+    }, 15000);
+
+    return () => window.clearInterval(interval);
   }, []);
 
   const dailyTasks = useMemo(() => tasks.filter((task) => task.type === "daily"), [tasks]);
@@ -225,19 +251,26 @@ export const AdminDashboardPage = () => {
       formData.append("resourceType", resourceType);
 
       if (resourceType === "pdf") {
-        if (resourceFiles.length === 0) {
+        if (!resourceFile) {
           toast.error("Please select at least one PDF file.");
           return;
         }
-        resourceFiles.forEach((file) => {
-          formData.append("files", file);
-        });
-      } else {
-        if (!resourceUrl.trim()) {
-          toast.error("Please enter a valid URL.");
+        if (resourceFile.type !== "application/pdf" || !resourceFile.name.toLowerCase().endsWith(".pdf")) {
+          toast.error("Only PDF files are allowed.");
           return;
         }
-        formData.append("fileUrl", resourceUrl);
+        if (resourceFile.size > resourcePdfMaxSizeMb * 1024 * 1024) {
+          toast.error(`PDF files must be ${resourcePdfMaxSizeMb}MB or smaller.`);
+          return;
+        }
+        formData.append("file", resourceFile);
+      } else {
+        const normalizedUrl = normalizeResourceUrl(resourceUrl);
+        if (!normalizedUrl) {
+          toast.error(resourceType === "poll" ? "Please enter a poll URL." : "Please enter a valid URL.");
+          return;
+        }
+        formData.append("fileUrl", normalizedUrl);
       }
 
       await api.post("/resources", formData, {
@@ -246,7 +279,8 @@ export const AdminDashboardPage = () => {
 
       setResourceTitle("");
       setResourceUrl("");
-      setResourceFiles([]);
+      setResourceFile(null);
+      setResourceType("link");
       toast.success("Resource added", "Students can open it from resources.");
       await loadData();
     } catch (error: any) {
@@ -369,7 +403,7 @@ export const AdminDashboardPage = () => {
   };
 
   const renderTaskSection = (items: Task[], label: string) => (
-    <Grid templateColumns={{ base: "1fr", xl: "1.1fr 1fr" }} gap={6}>
+    <Grid templateColumns={{ base: "1fr", md: "1fr 1fr", xl: "1.1fr 1fr" }} gap={6}>
       <GridItem>
         <Card bgGradient="linear(to-br, white, brand.50, mint.50)">
           <CardBody>
@@ -399,11 +433,14 @@ export const AdminDashboardPage = () => {
                 </FormControl>
                 <FormControl>
                   <FormLabel>Type</FormLabel>
-                  <Input value={taskType} readOnly />
+                  <Select value={taskType} onChange={(e) => setTaskType(e.target.value as "daily" | "monthly")}>
+                    <option value="daily">Daily</option>
+                    <option value="monthly">Monthly</option>
+                  </Select>
                 </FormControl>
               </SimpleGrid>
-              <Button type="submit" colorScheme="linkedin" isLoading={submitting}>
-                Save Task
+              <Button type="submit" colorScheme="linkedin" isLoading={submitting} w="full">
+                Upload Task
               </Button>
             </VStack>
           </CardBody>
@@ -418,20 +455,28 @@ export const AdminDashboardPage = () => {
             <VStack align="stretch" spacing={3}>
               {items.map((task) => (
                 <Box key={task._id} p={4} borderRadius="xl" bg="gray.50">
-                  <HStack justify="space-between" align="start">
-                    <Box flex="1">
+                  <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ base: "start", md: "start" }} gap={4}>
+                    <Box flex="1" minW={0}>
                       <Text fontWeight="700">{task.title}</Text>
-                      <Text color="gray.600" mt={2}>
+                      <Text color="gray.600" mt={2} wordBreak="break-word">
                         {task.description}
                       </Text>
                       <Text fontSize="sm" color="gray.500" mt={2}>
                         {new Date(task.date).toLocaleDateString()} · due {new Date(task.deadline).toLocaleString()}
                       </Text>
+                      <Text fontSize="sm" color="gray.600" mt={3}>
+                        Completed by {task.completedCount || 0} students
+                      </Text>
+                      {task.completedStudents?.length ? (
+                        <Text fontSize="sm" color="gray.500" mt={1}>
+                          {task.completedStudents.join(", ")}
+                        </Text>
+                      ) : null}
                     </Box>
-                    <Button size="sm" colorScheme="red" variant="outline" onClick={() => deleteTask(task._id)}>
+                    <Button size="sm" colorScheme="red" variant="outline" onClick={() => deleteTask(task._id)} w={{ base: "full", md: "auto" }}>
                       Delete
                     </Button>
-                  </HStack>
+                  </Stack>
                 </Box>
               ))}
             </VStack>
@@ -449,6 +494,47 @@ export const AdminDashboardPage = () => {
         return (
           <VStack align="stretch" spacing={4}>
             <Heading size="md">Verification system</Heading>
+            <Card>
+              <CardBody>
+                <Heading size="sm" mb={4}>
+                  Logged-in user details
+                </Heading>
+                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500">
+                      Name
+                    </Text>
+                    <Text fontWeight="700">{user?.name || "Not Available"}</Text>
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500">
+                      Username
+                    </Text>
+                    <Text fontWeight="700">{user?.username || "Not Available"}</Text>
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500">
+                      Register Number
+                    </Text>
+                    <Text fontWeight="700">{user?.registerNumber || "Not Available"}</Text>
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500">
+                      Gmail ID
+                    </Text>
+                    <Text fontWeight="700">{user?.email || "Not Available"}</Text>
+                  </Box>
+                  <Box>
+                    <Text fontSize="sm" color="gray.500">
+                      Role
+                    </Text>
+                    <Text fontWeight="700" textTransform="capitalize">
+                      {user?.role || "Not Available"}
+                    </Text>
+                  </Box>
+                </SimpleGrid>
+              </CardBody>
+            </Card>
             {submissions.map((submission) => (
               <Card key={submission._id}>
                 <CardBody>
@@ -505,7 +591,7 @@ export const AdminDashboardPage = () => {
         );
       case "announcements":
         return (
-          <Grid templateColumns={{ base: "1fr", xl: "1fr 1fr" }} gap={6}>
+          <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={6}>
             <GridItem>
               <Card>
                 <CardBody>
@@ -519,7 +605,7 @@ export const AdminDashboardPage = () => {
                       <FormLabel>Message</FormLabel>
                       <Textarea value={announcementMessage} onChange={(e) => setAnnouncementMessage(e.target.value)} />
                     </FormControl>
-                    <Button type="submit" colorScheme="purple">
+                    <Button type="submit" colorScheme="purple" w="full">
                       Post
                     </Button>
                   </VStack>
@@ -535,10 +621,10 @@ export const AdminDashboardPage = () => {
                   <VStack align="stretch" spacing={4}>
                     {announcements.map((announcement) => (
                       <Box key={announcement._id} p={4} borderRadius="xl" bg="gray.50">
-                        <HStack justify="space-between" align="start">
-                          <Box flex="1">
+                        <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ base: "start", md: "start" }} gap={4}>
+                          <Box flex="1" minW={0}>
                             <Text fontWeight="700">{announcement.title}</Text>
-                            <Text color="gray.600" mt={2}>
+                            <Text color="gray.600" mt={2} wordBreak="break-word">
                               {announcement.message}
                             </Text>
                             <VStack align="stretch" spacing={2} mt={3}>
@@ -550,10 +636,10 @@ export const AdminDashboardPage = () => {
                               ))}
                             </VStack>
                           </Box>
-                          <Button size="sm" colorScheme="red" variant="outline" onClick={() => deleteAnnouncement(announcement._id)}>
+                          <Button size="sm" colorScheme="red" variant="outline" onClick={() => deleteAnnouncement(announcement._id)} w={{ base: "full", md: "auto" }}>
                             Delete
                           </Button>
-                        </HStack>
+                        </Stack>
                       </Box>
                     ))}
                   </VStack>
@@ -564,7 +650,7 @@ export const AdminDashboardPage = () => {
         );
       case "polls":
         return (
-          <Grid templateColumns={{ base: "1fr", xl: "1fr 1fr" }} gap={6}>
+          <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={6}>
             <GridItem>
               <Card>
                 <CardBody>
@@ -585,7 +671,7 @@ export const AdminDashboardPage = () => {
                         />
                       </FormControl>
                     ))}
-                    <Button type="submit" colorScheme="linkedin">
+                    <Button type="submit" colorScheme="linkedin" w="full">
                       Save Poll
                     </Button>
                   </VStack>
@@ -603,12 +689,12 @@ export const AdminDashboardPage = () => {
                       const totalVotes = poll.options.reduce((sum, option) => sum + option.votes, 0);
                       return (
                         <Box key={poll._id} p={4} borderRadius="xl" bg="gray.50">
-                          <HStack justify="space-between" align="start" mb={3}>
-                            <Text fontWeight="700">{poll.question}</Text>
-                            <Button size="sm" colorScheme="red" variant="outline" onClick={() => deletePoll(poll._id)}>
+                          <Stack direction={{ base: "column", sm: "row" }} justify="space-between" align={{ base: "start", sm: "start" }} mb={3} gap={3}>
+                            <Text fontWeight="700" wordBreak="break-word">{poll.question}</Text>
+                            <Button size="sm" colorScheme="red" variant="outline" onClick={() => deletePoll(poll._id)} w={{ base: "full", sm: "auto" }}>
                               Delete
                             </Button>
-                          </HStack>
+                          </Stack>
                           <VStack align="stretch" spacing={3}>
                             {poll.options.map((option, index) => {
                               const percentage = totalVotes ? Math.round((option.votes / totalVotes) * 100) : 0;
@@ -682,7 +768,7 @@ export const AdminDashboardPage = () => {
                     <Input value={item.slots.join(", ")} onChange={(e) => updateScheduleSlot(index, e.target.value)} />
                   </FormControl>
                 ))}
-                <Button type="submit" colorScheme="purple" isLoading={savingSchedule}>
+                <Button type="submit" colorScheme="purple" isLoading={savingSchedule} w="full">
                   Save Schedule
                 </Button>
               </VStack>
@@ -691,7 +777,7 @@ export const AdminDashboardPage = () => {
         );
       case "resources":
         return (
-          <Grid templateColumns={{ base: "1fr", xl: "1fr 1fr" }} gap={6}>
+          <Grid templateColumns={{ base: "1fr", md: "1fr 1fr" }} gap={6}>
             <GridItem>
               <Card>
                 <CardBody>
@@ -702,31 +788,40 @@ export const AdminDashboardPage = () => {
                       <Input value={resourceTitle} onChange={(e) => setResourceTitle(e.target.value)} />
                     </FormControl>
                     <FormControl>
-                      <FormLabel>File / Link URL</FormLabel>
+                      <FormLabel>{resourceType === "pdf" ? "PDF file" : resourceType === "poll" ? "Poll URL" : "Link URL"}</FormLabel>
                       {resourceType === "pdf" ? (
-                        <input
+                        <Input
                           type="file"
-                          multiple
                           accept="application/pdf"
-                          onChange={(e) => setResourceFiles(Array.from(e.target.files || []))}
-                          style={{ padding: "8px", border: "1px solid #E2E8F0", borderRadius: "6px" }}
+                          p={1}
+                          onChange={(e) => setResourceFile(e.target.files?.[0] || null)}
                         />
                       ) : (
-                        <Input value={resourceUrl} onChange={(e) => setResourceUrl(e.target.value)} />
+                        <Input
+                          value={resourceUrl}
+                          onChange={(e) => setResourceUrl(e.target.value)}
+                          placeholder={resourceType === "poll" ? "https://..." : "https://..."}
+                        />
                       )}
+                      <Text fontSize="sm" color="gray.500" mt={2}>
+                        PDF uploads are limited to {resourcePdfMaxSizeMb}MB.
+                      </Text>
                     </FormControl>
                     <FormControl>
                       <FormLabel>Type</FormLabel>
                       <HStack>
-                        <Button variant={resourceType === "link" ? "solid" : "outline"} onClick={() => setResourceType("link")}>
+                        <Button type="button" variant={resourceType === "link" ? "solid" : "outline"} onClick={() => setResourceType("link")}>
                           Link
                         </Button>
-                        <Button variant={resourceType === "pdf" ? "solid" : "outline"} onClick={() => setResourceType("pdf")}>
+                        <Button type="button" variant={resourceType === "pdf" ? "solid" : "outline"} onClick={() => setResourceType("pdf")}>
                           PDF
+                        </Button>
+                        <Button type="button" variant={resourceType === "poll" ? "solid" : "outline"} onClick={() => setResourceType("poll")}>
+                          Poll
                         </Button>
                       </HStack>
                     </FormControl>
-                    <Button type="submit" colorScheme="linkedin">
+                    <Button type="submit" colorScheme="linkedin" w="full">
                       Save Resource
                     </Button>
                   </VStack>
@@ -735,30 +830,8 @@ export const AdminDashboardPage = () => {
             </GridItem>
             <GridItem>
               <Card>
-                <CardBody>
-                  <Heading size="md" mb={4}>
-                    Resources
-                  </Heading>
-                  <VStack align="stretch" spacing={3}>
-                    {resources.map((resource) => (
-                      <Box key={resource._id} p={4} borderRadius="xl" bg="gray.50">
-                        <HStack justify="space-between" align="start">
-                          <Box flex="1">
-                            <Text fontWeight="700">{resource.title}</Text>
-                            <Text color="gray.500" mt={1}>
-                              {resource.resourceType}
-                            </Text>
-                            <Button as="a" href={resource.fileUrl} target="_blank" rel="noreferrer" size="sm" mt={3} colorScheme="linkedin">
-                              Open
-                            </Button>
-                          </Box>
-                          <Button size="sm" colorScheme="red" variant="outline" onClick={() => deleteResource(resource._id)}>
-                            Delete
-                          </Button>
-                        </HStack>
-                      </Box>
-                    ))}
-                  </VStack>
+              <CardBody>
+                  <ResourceList resources={resources} onDelete={deleteResource} />
                 </CardBody>
               </Card>
             </GridItem>
@@ -782,7 +855,7 @@ export const AdminDashboardPage = () => {
                   <FormLabel>New Password</FormLabel>
                   <Input type="password" value={profilePassword} onChange={(e) => setProfilePassword(e.target.value)} placeholder="Optional" />
                 </FormControl>
-                <Button type="submit" colorScheme="purple">
+                <Button type="submit" colorScheme="purple" w="full">
                   Save Profile
                 </Button>
               </VStack>
@@ -791,7 +864,7 @@ export const AdminDashboardPage = () => {
         );
       case "tasks":
       default:
-        return renderTaskSection(dailyTasks, "Daily tasks");
+        return renderTaskSection(dailyTasks, "Upload tasks");
     }
   };
 

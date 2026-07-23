@@ -2,7 +2,29 @@ import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import { AuthRequest } from "../types.js";
+import { env } from "../config/env.js";
 import { signToken } from "../utils/jwt.js";
+
+const normalizeEmail = (value?: string) => value?.trim().toLowerCase() || "";
+
+const normalizeUsername = (value: string) => value.trim().toLowerCase();
+
+const buildUniqueUsername = async (baseValue: string) => {
+  const normalizedBase = baseValue
+    .replace(/[^a-z0-9._-]/gi, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .toLowerCase() || "student";
+
+  let candidate = normalizedBase;
+  let counter = 1;
+
+  while (await User.findOne({ username: candidate }).lean()) {
+    candidate = `${normalizedBase}${counter}`;
+    counter += 1;
+  }
+
+  return candidate;
+};
 
 const buildAuthPayload = (user: any) => {
   const role = user.role === "admin" ? "admin" : "student";
@@ -14,6 +36,8 @@ const buildAuthPayload = (user: any) => {
       name: user.name || user.username,
       username: user.username,
       registerNumber: user.registerNumber || "",
+      email: user.email || "",
+      googleId: user.googleId || "",
       role
     }
   };
@@ -48,7 +72,7 @@ export const register = async (req: Request, res: Response) => {
 
     console.log("[REGISTER] ✓ Required fields present");
 
-    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedUsername = normalizeUsername(username);
     console.log("[REGISTER] Normalized username:", normalizedUsername);
 
     console.log("[REGISTER] Checking for existing user...");
@@ -140,6 +164,7 @@ export const register = async (req: Request, res: Response) => {
         name: savedUser.name || savedUser.username,
         username: savedUser.username,
         registerNumber: savedUser.registerNumber || "",
+        email: savedUser.email || "",
         role: savedUser.role === "admin" ? "admin" : "student"
       }
     });
@@ -299,10 +324,120 @@ export const updateMe = async (req: AuthRequest, res: Response) => {
       name: user.name || user.username,
       username: user.username,
       registerNumber: user.registerNumber || "",
+      email: user.email || "",
+      googleId: user.googleId || "",
       role: user.role === "admin" ? "admin" : "student"
     });
   } catch (error) {
     console.error("UPDATE ME ERROR:", error);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+
+const verifyGoogleCredential = async (credential: string) => {
+  if (!env.googleClientId) {
+    throw new Error("GOOGLE_CLIENT_ID is missing in environment variables");
+  }
+
+  const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`);
+  if (!response.ok) {
+    throw new Error("Unable to verify Google credential");
+  }
+
+  const payload = (await response.json()) as {
+    aud?: string;
+    email?: string;
+    email_verified?: string;
+    name?: string;
+    sub?: string;
+    picture?: string;
+  };
+
+  if (payload.aud !== env.googleClientId) {
+    throw new Error("Google credential audience mismatch");
+  }
+
+  if (payload.email_verified !== "true") {
+    throw new Error("Google email is not verified");
+  }
+
+  if (!payload.email || !payload.sub) {
+    throw new Error("Google profile is incomplete");
+  }
+
+  return payload;
+};
+
+export const googleLogin = async (req: Request, res: Response) => {
+  try {
+    const { credential, role } = req.body as { credential?: string; role?: "admin" | "student" };
+
+    if (!credential?.trim()) {
+      return res.status(400).json({ message: "Google credential is required." });
+    }
+
+    const profile = await verifyGoogleCredential(credential.trim());
+    const email = normalizeEmail(profile.email);
+    const googleId = profile.sub;
+    const roleToUse = role === "admin" ? "admin" : "student";
+
+    let user = await User.findOne({
+      $or: [
+        { email },
+        { googleId }
+      ]
+    });
+
+    if (!user) {
+      const usernameFallback = email.split("@")[0];
+      if (usernameFallback) {
+        user = await User.findOne({ username: usernameFallback });
+      }
+    }
+
+    if (!user) {
+      const usernameBase = email.split("@")[0] || "student";
+      const username = await buildUniqueUsername(usernameBase);
+      user = await User.create({
+        name: profile.name?.trim() || email.split("@")[0] || username,
+        email,
+        googleId,
+        username,
+        registerNumber: "",
+        password: await bcrypt.hash(`${googleId}:${Date.now()}`, 10),
+        role: roleToUse
+      });
+    } else {
+      let shouldSave = false;
+
+      if (!user.email) {
+        user.email = email;
+        shouldSave = true;
+      }
+
+      if (!user.googleId) {
+        user.googleId = googleId;
+        shouldSave = true;
+      }
+
+      if (!user.name?.trim()) {
+        user.name = profile.name?.trim() || user.username;
+        shouldSave = true;
+      }
+
+      if (!user.role) {
+        user.role = roleToUse;
+        shouldSave = true;
+      }
+
+      if (shouldSave) {
+        await user.save();
+      }
+    }
+
+    return res.json(buildAuthPayload(user));
+  } catch (error: any) {
+    console.error("[GOOGLE LOGIN] Failed:", error);
+    return res.status(401).json({ message: error?.message || "Google sign-in failed." });
   }
 };
