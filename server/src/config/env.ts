@@ -10,6 +10,7 @@ dotenv.config({ path: envPath });
 
 const mongoUri = process.env.MONGODB_URI?.trim() || "";
 const jwtSecret = process.env.JWT_SECRET?.trim() || "replace-with-a-secure-secret";
+const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined;
 
 if (!mongoUri) {
   console.warn(`MONGODB_URI is not set. Skipping MongoDB connection. Expected .env at ${envPath}`);
@@ -23,6 +24,6 @@ export const env = {
   port: Number(process.env.PORT || 5000),
   mongoUri,
   jwtSecret,
-  clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
+  clientUrl: process.env.CLIENT_URL || vercelUrl || "http://localhost:5173",
   googleClientId: process.env.GOOGLE_CLIENT_ID || ""
 };

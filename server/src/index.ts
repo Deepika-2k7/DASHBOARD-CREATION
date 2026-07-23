@@ -78,19 +78,27 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ message: "Server error" });
 });
 
+export const initializeDatabase = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
+
+  console.log("[DATABASE] Connecting to MongoDB...");
+  console.log("[DATABASE] URI configured:", env.mongoUri ? "YES" : "NO");
+
+  const connected = await connectDb();
+  if (!connected) {
+    throw new Error("MONGODB_URI is missing in environment variables");
+  }
+
+  console.log("[DATABASE] ✓ Successfully connected to MongoDB");
+  console.log("[DATABASE] Connection state:", mongoose.connection.readyState);
+  console.log("[DATABASE] Database name:", mongoose.connection.db?.databaseName || "unknown");
+};
+
 const startServer = async () => {
   try {
-    console.log("[DATABASE] Connecting to MongoDB...");
-    console.log("[DATABASE] URI configured:", env.mongoUri ? "YES" : "NO");
-
-    const connected = await connectDb();
-    if (!connected) {
-      throw new Error("MONGODB_URI is missing in environment variables");
-    }
-
-    console.log("[DATABASE] ✓ Successfully connected to MongoDB");
-    console.log("[DATABASE] Connection state:", mongoose.connection.readyState);
-    console.log("[DATABASE] Database name:", mongoose.connection.db?.databaseName || "unknown");
+    await initializeDatabase();
 
     app.listen(port, () => {
       console.log("[SERVER] ✓ Server is running!");
@@ -110,4 +118,8 @@ const startServer = async () => {
   }
 };
 
-void startServer();
+if (process.env.VERCEL !== "1") {
+  void startServer();
+}
+
+export { app };

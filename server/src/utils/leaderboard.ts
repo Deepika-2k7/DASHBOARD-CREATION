@@ -192,7 +192,7 @@ export const buildLeaderboardTop = async (limit: number): Promise<LeaderboardEnt
       $addFields: {
         streak: {
           $function: {
-            body: function (dailyDates) {
+            body: function (dailyDates: any) {
               if (!Array.isArray(dailyDates)) {
                 return 0;
               }
